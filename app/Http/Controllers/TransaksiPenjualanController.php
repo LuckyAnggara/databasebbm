@@ -101,6 +101,7 @@ class TransaksiPenjualanController extends Controller
             'tanggal_jatuh_tempo' => $request->pembayaran['tanggalJatuhTempo'],
             'retur' => 2,
             'user_id' => 1,
+            'catatan' => $request->catatan,
         ]);
         $id = $data->id;
         if($id){
@@ -115,6 +116,8 @@ class TransaksiPenjualanController extends Controller
                 ]);
             }
         }
+
+        $dd = $request->pembayaran['statusPembayaran']['value'];
         $this->postJurnal(
             $nomor_transaksi,
             'PENJUALAN NOMOR INVOICE #'.$nomor_transaksi,
@@ -122,7 +125,7 @@ class TransaksiPenjualanController extends Controller
             $request->invoice['pajak'],
             $request->invoice['ongkir'],
             $request->invoice['diskon'],
-            $request->pembayaran['kredit'],
+            $dd,
             $request->pembayaran['downPayment'],
             $sisa_pembayaran,
         );
@@ -212,25 +215,23 @@ class TransaksiPenjualanController extends Controller
         return $data['id'];
     }
 
-
     // JURNAL
     
-    public function postJurnal($nomor_transaksi,$keterangan, $penjualan, $pajak = 0, $ongkir = 0, $diskon = 0, $piutang = false, $dp=0, $sisa_pembayaran=0){
+    public function postJurnal($nomor_transaksi,$keterangan, $penjualan, $pajak = 0, $ongkir = 0, $diskon = 0, $metodePembayaran = 0, $dp=0, $sisa_pembayaran=0){
         $reqJurnal = Http::get('http://127.0.0.1:8080/api/jurnal/reqnomorjurnal');
         $nomorJurnal = $reqJurnal->json();
         $kas = $penjualan + $pajak + $ongkir;
-        if($piutang == false){
+        if($metodePembayaran == 0){
             $kas = Http::post('http://127.0.0.1:8080/api/jurnal/store/', [
                 'reff'=>$nomor_transaksi,
                 'nomor_jurnal'=>$nomorJurnal,
                 'master_akun_id'=>'3', // KAS
-                'nominal'=>$kas,
+                'nominal'=> $kas,
                 'jenis'=>'DEBIT',
                 'keterangan'=>'PENERIMAAN KAS '. $keterangan,
             ]);
             $response['kas'] = $kas->json();
-
-        }else{
+        }else if ($metodePembayaran == 1){
             if($dp !== 0){
                 $kas = Http::post('http://127.0.0.1:8080/api/jurnal/store/', [
                     'reff'=>$nomor_transaksi,
@@ -241,7 +242,6 @@ class TransaksiPenjualanController extends Controller
                     'keterangan'=>'PENERIMAAN KAS DOWN PAYMENT '. $keterangan,
                 ]);
                 $response['kas'] = $kas->json();
-
             }
             $piutang = Http::post('http://127.0.0.1:8080/api/jurnal/store/', [
                 'reff'=>$nomor_transaksi,
@@ -252,9 +252,17 @@ class TransaksiPenjualanController extends Controller
                 'keterangan'=>'PIUTANG '. $keterangan,
             ]);
             $response['piutang'] = $piutang->json();
-
+        }else if ($metodePembayaran == 2){
+            $cod = Http::post('http://127.0.0.1:8080/api/jurnal/store/', [
+                'reff'=>$nomor_transaksi,
+                'nomor_jurnal'=>$nomorJurnal,
+                'master_akun_id'=>'5', // PIUTANG DAGANG
+                'nominal'=>$kas,
+                'jenis'=>'DEBIT',
+                'keterangan'=>'PIUTANG COD '. $keterangan,
+            ]);
+            $response['cod'] = $cod->json();
         }
-
         $penjualan = Http::post('http://127.0.0.1:8080/api/jurnal/store/', [
             'reff'=>$nomor_transaksi,
             'nomor_jurnal'=>$nomorJurnal,
@@ -264,8 +272,6 @@ class TransaksiPenjualanController extends Controller
             'keterangan'=>$keterangan,
         ]);
         $response['penjualan'] = $penjualan->json();
-
-
         if($pajak !== 0){
             $pajak = Http::post('http://127.0.0.1:8080/api/jurnal/store/', [
                 'reff'=>$nomor_transaksi,
