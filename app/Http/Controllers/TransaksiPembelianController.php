@@ -23,7 +23,7 @@ class TransaksiPembelianController extends Controller
         
         $output=[];
 
-        $dateawal = date("Y-m-d 00:00:01", strtotime($dd));
+        $dateawal = date("Y-m-d 00:00:00", strtotime($dd));
         $dateakhir = date("Y-m-d 23:59:59", strtotime($ddd));
         $master = DB::table('master_pembelian')
         ->where('created_at','>',$dateawal)    
@@ -56,9 +56,9 @@ class TransaksiPembelianController extends Controller
         $pembayaran = [
             'downPayment'=>$value->down_payment,
             'sisaPembayaran'=>$value->sisa_pembayaran,
-            'jenisPembayaran' => $this->caraPembayaran($value->cara_pembayaran),
+            'jenisPembayaran' => caraPembayaran($value->cara_pembayaran),
             'kredit'=>$value->kredit,
-            'statusPembayaran'=>$this->metodePembayaran($value->metode_pembayaran),
+            'statusPembayaran'=> metodePembayaran($value->metode_pembayaran),
             'tanggalJatuhTempo'=>$value->tanggal_jatuh_tempo,
         ];
 
@@ -80,41 +80,6 @@ class TransaksiPembelianController extends Controller
         return response()->json($output, 200);
     }
 
-        //  FUNGSI STANDARD
-        public function metodePembayaran($text){
-            $title = '';
-            $value = 0;
-            if($text == 'Lunas'){
-                $title = $text;
-                $value = 0;
-            }else if($text == 'Kredit'){
-                $title = $text;
-                $value = 1;
-            }else if($text == 'Cash On Delivery (COD)'){
-                $title = $text;
-                $value = 2;
-            }
-            return [
-                'title'=> $title,
-                'value' => $value
-            ];
-        }
-    
-        public function caraPembayaran($text){
-            $title = '';
-            $value = 0;
-            if($text == 'Tunai'){
-                $title = $text;
-                $value = 0;
-            }else if($text == 'Transfer'){
-                $title = $text;
-                $value = 1;
-            }
-            return [
-                'title'=> $title,
-                'value' => $value
-            ];
-        }  
         
         public function store(Request $request){
     
@@ -128,6 +93,7 @@ class TransaksiPembelianController extends Controller
     
             $data = TransaksiPembelian::create([
                 'nomor_transaksi'=> $request->nomorTransaksi,
+                'created_at'=> date("Y-m-d h:i:s", strtotime($request->tanggalTransaksi)),
                 'kontak_id' => $this->cekSupplier($request->supplier),
                 'total' => $request->invoice['total'],
                 'diskon' => $request->invoice['diskon'],
@@ -153,11 +119,28 @@ class TransaksiPembelianController extends Controller
                         'harga' => $value['harga'],
                         'diskon' => $value['diskon'],
                         'total' => ($value['jumlah'] * $value['harga']) - $value['diskon'],
+                        'created_at'=> date("Y-m-d h:i:s", strtotime($request->tanggalTransaksi)),
                     ]);
+
+                    $debit = $this->debitPersediaan($request->nomorTransaksi, $value, 'Pembelian Transaksi #'); 
                 }
+                $dd = $request->pembayaran['statusPembayaran']['value']; // CEK STATUS PEMBAYARANNYA KREDIT / LUNAS / COD
+    
+                $jurnal = $this->postJurnal(
+                    'PEMBELIAN_ID_'.$id,
+                    'PEMBELIAN NOMOR INVOICE #'.$request->nomorTransaksi,
+                    $request->invoice['total'],
+                    $request->invoice['pajak'],
+                    $request->invoice['ongkir'],
+                    $request->invoice['diskon'],
+                    $dd,
+                    $request->pembayaran['downPayment'],
+                    $sisa_pembayaran,
+                ); 
+
             }
     
-            return response()->json($data, 200);
+            return response()->json($jurnal, 200);
         }
 
         public function cekSupplier($data){
@@ -174,14 +157,114 @@ class TransaksiPembelianController extends Controller
             return $data['id'];
         }
 
-        public function debitPersediaan($data){
+        public function debitPersediaan($nomor_transaksi, $data, $catatan){
             $detail = KartuPersediaan::create([
-                'master_pembelian_id'=> $id,
-                'kode_barang_id' => $value['kode_barang'],
-                'jumlah' => $value['jumlah'],
-                'harga' => $value['harga'],
-                'diskon' => $value['diskon'],
-                'total' => ($value['jumlah'] * $value['harga']) - $value['diskon'],
+                'nomor_transaksi'=> $nomor_transaksi,
+                'master_barang_id' => $data['id_barang'],
+                'debit' => $data['jumlah'],
+                'harga_beli' => $data['harga'],
+                'kredit' => 0,
+                'harga_jual' => 0,
+                'catatan' => $catatan.'#'.$nomor_transaksi,
             ]);
         }
+
+        public function postJurnal(
+            $reff,
+            $keterangan, 
+            $pembelian, 
+            $pajak = 0, 
+            $ongkir = 0, 
+            $diskon = 0, 
+            $metodePembayaran = 0, 
+            $dp=0, 
+            $sisa_pembayaran=0
+        ){
+            $base_url = keuangan_base_url();
+
+            $reqJurnal = Http::get($base_url.'reqnomorjurnal');
+            $nomorJurnal = $reqJurnal->json();
+
+            $kas = $pembelian + $pajak + $ongkir;
+
+            if($metodePembayaran == 0){
+                $kas = Http::post($base_url.'store/', [
+                    'reff'=>$reff,
+                    'nomor_jurnal'=>$nomorJurnal,
+                    'master_akun_id'=>'3', // KAS BESAR
+                    'nominal'=> $kas,
+                    'jenis'=>'KREDIT',
+                    'keterangan'=>'PENGELUARAN KAS '. $keterangan,
+                ]);
+                $response['kas'] = $kas->json();
+            }else if ($metodePembayaran == 1){
+                if($dp !== 0){
+                    $kas = Http::post($base_url.'store/', [
+                        'reff'=>$reff,
+                        'nomor_jurnal'=>$nomorJurnal,
+                        'master_akun_id'=>'3', // KAS
+                        'nominal'=>$dp,
+                        'jenis'=>'KREDIT',
+                        'keterangan'=>'PENGELUARAN KAS DOWN PAYMENT '. $keterangan,
+                    ]);
+                    $response['kas'] = $kas->json();
+                }
+                $utang = Http::post($base_url.'store/', [
+                    'reff'=>$reff,
+                    'nomor_jurnal'=>$nomorJurnal,
+                    'master_akun_id'=>'21', // UTANG DAGANG
+                    'nominal'=>$sisa_pembayaran,
+                    'jenis'=>'KREDIT',
+                    'keterangan'=>'UTANG '. $keterangan,
+                ]);
+                $response['utang'] = $utang->json();
+            }
+            
+            $persediaan = Http::post($base_url.'store/', [
+                'reff'=>$reff,
+                'nomor_jurnal'=>$nomorJurnal,
+                'master_akun_id'=>'6', // PEMBELIAN
+                'nominal'=>$pembelian,
+                'jenis'=>'DEBIT',
+                'keterangan'=>$keterangan,
+            ]);
+            $response['persediaan'] = $persediaan->json();
+            
+            if($pajak !== 0){
+                $pajak = Http::post($base_url.'store/', [
+                    'reff'=>$reff,
+                    'nomor_jurnal'=>$nomorJurnal,
+                    'master_akun_id'=>'9', // PAJAK MASUKAN
+                    'nominal'=>$pajak,
+                    'jenis'=>'DEBIT',
+                    'keterangan'=>'PAJAK MASUKAN '. $keterangan,
+                ]);
+                $response['pajak'] = $pajak->json();
+            }
+            if($ongkir !== 0){
+                $ongkir = Http::post($base_url.'store/', [
+                    'reff'=>$reff,
+                    'nomor_jurnal'=>$nomorJurnal,
+                    'master_akun_id'=>'43', // AKUN BIAYA LAIN LAIN
+                    'nominal'=>$ongkir,
+                    'jenis'=>'DEBIT',
+                    'keterangan'=>'ONGKIR '. $keterangan,
+                ]);
+                $response['ongkir'] = $ongkir->json();
+            }
+            if($diskon !== 0){
+                $diskon = Http::post($base_url.'store/', [
+                    'reff'=>$reff,
+                    'nomor_jurnal'=>$nomorJurnal,
+                    'master_akun_id'=>'39', // AKUN DISKON PEMBELIAN
+                    'nominal'=>$diskon,
+                    'jenis'=>'KREDIT',
+                    'keterangan'=>'DISKON '. $keterangan,
+                ]);
+                $response['diskon'] = $diskon->json();
+            }
+            return response()->json($response, 200);
+        }
+
+
 }
