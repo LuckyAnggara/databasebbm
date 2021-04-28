@@ -165,8 +165,10 @@ class TransaksiPenjualanController extends Controller
     }
 
     public function hpp($data){
+
         $hpp = 0;
         foreach ($data as $key => $value) {
+
             $barang = Barang::find($value['id_barang']);
             if($barang->jenis == 'FIFO'){
                 $harga_perolehan = DB::table('detail_pembelian')
@@ -180,11 +182,14 @@ class TransaksiPenjualanController extends Controller
                 ->where('kode_barang_id', '=',$barang->kode_barang)
                 ->first();
             }
+            if($harga_perolehan === null){
+                $harga_perolehan->harga = 0;
+            }
             $harga = $harga_perolehan->harga * $value['jumlah'];
             $hpp += $harga;
-
         }
-        return $hpp;
+
+        return  $hpp;
     }
 
     
