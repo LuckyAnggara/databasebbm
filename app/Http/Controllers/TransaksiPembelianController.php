@@ -25,59 +25,68 @@ class TransaksiPembelianController extends Controller
 
         $dateawal = date("Y-m-d 00:00:00", strtotime($dd));
         $dateakhir = date("Y-m-d 23:59:59", strtotime($ddd));
+        if($dd == "null" || $ddd == "null"){
+            
+            $dateawal = date("Y-01-01 00:00:00");
+            $dateakhir = date("Y-12-31 23:59:59");
+        }
         $master = DB::table('master_pembelian')
         ->where('created_at','>',$dateawal)    
         ->where('created_at','<',$dateakhir)  
         ->where('deleted_at')   
         ->get();
 
-        foreach ($master as $key => $value) {
-        $invoice = [
-            'diskon'=>$value->diskon,
-            'grandTotal'=>$value->grand_total,
-            'ongkir'=>$value->ongkir,
-            'pajak'=>$value->pajak_masukan,
-            'total'=>$value->total,
-        ];
-
-        $user = $barang = User::find($value->user_id);
-
-        $orders = DB::table('detail_pembelian')
-        ->select('detail_pembelian.*', 'barang.nama as nama_barang')
-        ->join('barang','detail_pembelian.kode_barang_id','=','barang.kode_barang')    
-        ->where('master_pembelian_id','=',$value->id)    
-        ->get();
-
-        $supplier = DB::table('master_kontak')
-        ->where('id','=',$value->kontak_id)
-        ->first();
-
-
-        $pembayaran = [
-            'downPayment'=>$value->down_payment,
-            'sisaPembayaran'=>$value->sisa_pembayaran,
-            'jenisPembayaran' => caraPembayaran($value->cara_pembayaran),
-            'kredit'=>$value->kredit,
-            'statusPembayaran'=> metodePembayaran($value->metode_pembayaran),
-            'tanggalJatuhTempo'=>$value->tanggal_jatuh_tempo,
-        ];
-
-        $data = [
-            'id'=>$value->id,
-            'nomorTransaksi'=>$value->nomor_transaksi,
-            'tanggalTransaksi'=>$value->created_at,
-            'invoice'=> $invoice,
-            'orders'=>$orders,
-            'supplier'=>$supplier,
-            'pembayaran'=>$pembayaran,
-            'user'=> $user
-
-        ];
-
-        $output[] = $data;
-        }
-
+        $output = $this->getDataPembelian($master);
         return response()->json($output, 200);
+    }
+
+    public function getDataPembelian($master){
+        foreach ($master as $key => $value) {
+            $invoice = [
+                'diskon'=>$value->diskon,
+                'grandTotal'=>$value->grand_total,
+                'ongkir'=>$value->ongkir,
+                'pajak'=>$value->pajak_masukan,
+                'total'=>$value->total,
+            ];
+
+            $user = $barang = User::find($value->user_id);
+
+            $orders = DB::table('detail_pembelian')
+            ->select('detail_pembelian.*', 'barang.nama as nama_barang')
+            ->join('barang','detail_pembelian.kode_barang_id','=','barang.kode_barang')    
+            ->where('master_pembelian_id','=',$value->id)    
+            ->get();
+
+            $supplier = DB::table('master_kontak')
+            ->where('id','=',$value->kontak_id)
+            ->first();
+
+
+            $pembayaran = [
+                'downPayment'=>$value->down_payment,
+                'sisaPembayaran'=>$value->sisa_pembayaran,
+                'jenisPembayaran' => caraPembayaran($value->cara_pembayaran),
+                'kredit'=>$value->kredit,
+                'statusPembayaran'=> metodePembayaran($value->metode_pembayaran),
+                'tanggalJatuhTempo'=>$value->tanggal_jatuh_tempo,
+            ];
+
+            $data = [
+                'id'=>$value->id,
+                'nomorTransaksi'=>$value->nomor_transaksi,
+                'tanggalTransaksi'=>$value->created_at,
+                'invoice'=> $invoice,
+                'orders'=>$orders,
+                'supplier'=>$supplier,
+                'pembayaran'=>$pembayaran,
+                'user'=> $user
+
+            ];
+
+            $output[] = $data;
+        }
+        return $output;
     }
 
         
@@ -266,5 +275,28 @@ class TransaksiPembelianController extends Controller
             return response()->json($response, 200);
         }
 
+        public function getDetailTransaksiByBarang($kode_barang){
+
+            $output = [];
+            $batch = [];
+    
+            $master = DB::table('detail_pembelian')
+            ->select('detail_pembelian.*', 'master_pembelian.nomor_transaksi as nomor_transaksi','master_pembelian.sisa_pembayaran','master_kontak.nama as nama_supplier')
+            ->where('kode_barang_id','=',$kode_barang)    
+            ->join('master_pembelian','detail_pembelian.master_pembelian_id','=','master_pembelian.id')    
+            ->join('master_kontak','master_pembelian.kontak_id','=','master_kontak.id')    
+            ->get();
+            
+            foreach ($master as $key => $value) {
+                $data = DB::table('master_pembelian')
+                ->where('id','=',$value->master_pembelian_id)    
+                ->first();
+                $batch[] = $data;
+            }
+    
+            $output = $this->getDataPembelian($batch);
+    
+            return response()->json($output, 200);
+        }
 
 }

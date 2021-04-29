@@ -61,30 +61,23 @@ class PersediaanController extends Controller
     public function show($id){
       
         $persediaan =[];
-        try{
-            // $barang = Barang::findOrFail($id);
-            // $barang = DB::table('barang')
-            // ->join('jenis_barang', 'barang.jenis_id', '=', 'jenis_barang.id')
-            // ->join('merek_barang', 'barang.merek_id', '=', 'merek_barang.id')
-            // ->join('gudang', 'barang.gudang_id', '=', 'gudang.id')
-            // ->select('barang.*', 'gudang.nama as nama_gudang','jenis_barang.nama as nama_jenis', 'merek_barang.nama as nama_merek')
-            // ->where('barang.id', '=',$id)
-            // ->first();
-            
-            $data = DB::table('master_persediaan')
+        try{            
+            $data = DB::table('kartu_persediaan')
             ->select('*')
-            ->where('kode_barang_id', '=',$id)
-            ->orderBy('id', 'desc')
+            ->where('master_barang_id', '=',$id)
+            ->orderBy('id', 'asc')
             ->get();
-
+            
+            $saldo = 0;
             foreach ($data as $key => $value) {
-                $master_penjualan = DB::table('master_penjualan')
-                ->select('*')
-                ->where('id', '=',$value->master_penjualan_id)
-                ->orderBy('id', 'desc')
-                ->first();
-                $value->master_penjualan = $master_penjualan;
-                $persediaan[] = $value;
+                $persediaan[$key] = $value;
+                if($value->kredit == 0){
+                    $saldo += $value->debit;
+                }
+                else{
+                    $saldo -= $value->kredit;
+                }
+                $persediaan[$key]->saldo = $saldo;
             }
             
             $response = $persediaan;
